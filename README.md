@@ -57,7 +57,7 @@ docker exec -it pyvless sh
 diagnose-pyvless
 ```
 
-它会输出环境变量、`vs.py` 进程、监听端口、IPv4/IPv6 本地健康检查和 `localhost` 解析结果。
+它会输出环境变量、`vs.py` 进程、监听端口、IPv4/IPv6 本地健康检查、DNS 解析，以及到公网的出站 TCP/HTTPS 连通性。
 
 平台没有 `docker exec` 时，使用平台控制台的“终端 / Exec / Web Shell”进入实例，然后依次执行：
 
@@ -133,6 +133,54 @@ curl -i --max-time 5 http://127.0.0.1:10086/time
 6. **确认平台到容器的协议**
 
    容器默认提供 HTTP。平台应使用 HTTP 访问上游并在边缘终止 TLS；如果平台把上游协议配置成 HTTPS，而容器没有配置证书，会直接 502。
+
+### VLESS 握手成功、目标连接超时
+
+容器日志出现下面两行，说明客户端已经连上 VLESS 服务，UUID、路径、WebSocket 和平台转发都正常：
+
+```text
+client <地址> command=1 -> www.google.com:443 ...
+WARNING: vless error ... connect target timeout after 10s: www.google.com:443
+```
+
+`command=1` 是 TCP 转发请求，后面的地址是客户端要求访问的目标。失败发生在容器向该目标建立出站连接时，与 VLESS 客户端配置无关。
+
+进入容器执行：
+
+```sh
+diagnose-pyvless
+```
+
+也可以手动检查：
+
+```sh
+env | grep -i proxy
+getent ahosts www.google.com
+getent ahostsv4 www.google.com
+ip -6 route
+nc -z -w 5 www.google.com 443
+curl -4 -sS -o /dev/null -w 'IPv4 %{http_code}\n' https://www.google.com
+curl -6 -sS -o /dev/null -w 'IPv6 %{http_code}\n' --max-time 10 https://www.google.com
+curl -v --max-time 10 https://www.google.com
+curl -v --max-time 10 https://example.com
+```
+
+如果 `curl` 成功但 `vs.py` 仍然超时，先看 `curl -v` 是否出现 `Uses proxy`，
+以及环境中是否存在 `HTTP_PROXY`、`HTTPS_PROXY` 或 `ALL_PROXY`。`curl`
+会读取这些变量并通过代理访问外网，而 `vs.py` 为目标站点建立的是直连
+TCP；代理可用不代表直连可用。容器镜像已启用 Happy Eyeballs，会同时
+尝试解析出的 IPv4 和 IPv6 地址，避免不可达的 IPv6 地址耗尽连接超时。
+
+判断方式：
+
+- `curl` 输出 `Uses proxy`：外网访问依赖平台代理，VLESS 直连会被阻断。
+- `ip -6 route` 没有 `default`，`curl -4` 成功而 `curl -6` 卡住：容器没有
+  IPv6 出网路由。旧版 `vs.py` 会先尝试 DNS 返回的 IPv6 地址并一直等到
+  `--connect-timeout`；更新镜像后会在 0.25 秒内并行尝试 IPv4 并回退。
+- `getent ahosts` 同时返回 IPv4/IPv6，但 IPv6 直连超时：原因同上。
+- DNS 能解析，但 `nc` 显示超时或 `SYN-SENT`：平台的出站 TCP 被阻断。
+- `www.google.com` 失败而 `example.com` 正常：服务器网络到 Google 不可达或被限制，不代表 VLESS 整体不可用。
+- 所有目标都超时：Cloady 实例没有公网出站权限，或需要配置 NAT/防火墙放行。VLESS 必须能主动连接客户端请求的网站，否则只能换到允许任意出站 TCP 的实例或 VPS。
 
 ## 直接使用镜像
 
@@ -254,6 +302,34 @@ sudo chmod 600 certs/privkey.pem
 | TLS | 直连 TLS 或反向代理时开启 |
 
 若通过 CDN 或反向代理转发，请确保其支持 WebSocket Upgrade，并放行对应路径。
+
+### Cloady / Kubernetes 平台示例
+
+Cloady 会把容器的 `10086` 端口作为 Web/HTTP 端点暴露，因此 `docker-compose.yml` 中必须写成 `10086:10086`，不要写成 `10086:10086/tcp`。重新部署后，先用下面的地址确认平台已经正确路由到容器：
+
+```text
+https://<平台分配域名>/health
+```
+
+返回 `200` 后，客户端按以下参数连接：
+
+| 项目 | 值 |
+| --- | --- |
+| 地址 | `<平台分配域名>` |
+| 端口 | `443` |
+| UUID | 环境变量 `VLESS_UUID` 的值 |
+| 传输 | WebSocket |
+| 路径 | `/vless` |
+| TLS | 开启 |
+| SNI / Host | `<平台分配域名>` |
+
+对应的 VLESS URI：
+
+```text
+vless://<VLESS_UUID>@<平台分配域名>:443?encryption=none&security=tls&sni=<平台分配域名>&type=ws&host=<平台分配域名>&path=%2Fvless#pyvless
+```
+
+不要在 Cloady 的客户端配置中使用 `:10086`；该端口只供平台内部转发。若 `/health` 仍是平台返回的 `404 page not found`，说明端点仍然是 TCP 类型或尚未重新创建，VLESS 也不会连通。
 
 ## 安全建议
 

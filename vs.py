@@ -550,17 +550,30 @@ async def open_target_connection(
     """
     建立到目标服务器的 TCP 连接。
 
-    对域名不强制 IPv4，让系统 happy-eyeballs / DNS 策略自行选择地址族；
-    这比固定 AF_INET 更兼容 IPv6-only 或优先 IPv6 的目标站点。
+    使用 Happy Eyeballs 并行尝试 IPv4/IPv6。仅依赖 asyncio 默认的串行
+    getaddrinfo 顺序时，如果首个地址是不可达的 IPv6，整个连接会一直等待
+    到超时，即使同一主机的 IPv4 地址可以正常访问。
     """
 
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
+            asyncio.open_connection(
+                host,
+                port,
+                happy_eyeballs_delay=0.25,
+                interleave=1,
+            ),
             timeout=timeout,
         )
+    except TimeoutError as exc:
+        raise VlessError(
+            f"connect target timeout after {timeout:g}s: {host}:{port}"
+        ) from exc
     except Exception as exc:
-        raise VlessError(f"connect target failed: {host}:{port}, {exc}") from exc
+        detail = str(exc) or exc.__class__.__name__
+        raise VlessError(
+            f"connect target failed: {host}:{port}: {exc.__class__.__name__}: {detail}"
+        ) from exc
 
     sock = writer.get_extra_info("socket")
     if sock:
