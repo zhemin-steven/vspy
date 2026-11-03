@@ -11,7 +11,7 @@
 | `healthcheck.py` | 容器健康检查，支持 HTTP 和直接 TLS |
 | `docker-compose.yml` | 本地或服务器上的 Compose 部署 |
 | `.github/workflows/docker.yml` | 推送到 GitHub 后自动构建并发布 GHCR 镜像 |
-| `.env.example` | 环境变量示例 |
+| `.env.example` | `docker run --env-file` 的环境变量示例（Compose 不使用） |
 
 ## 快速启动
 
@@ -21,13 +21,7 @@
    python3 -c "import uuid; print(uuid.uuid4())"
    ```
 
-2. 创建配置：
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   编辑 `.env`，把 `VLESS_UUID` 替换为上一步生成的 UUID。
+2. 编辑 `docker-compose.yml`，把 `VLESS_UUID` 替换为上一步生成的 UUID。
 
 3. 构建并启动：
 
@@ -43,9 +37,9 @@
    docker compose logs -f vless
    ```
 
-服务默认监听容器内的 `10086` 端口，WebSocket 路径默认为 `/vless`。`HOST_PORT` 只改变宿主机映射端口。
+服务默认监听并映射 `10086` 端口，WebSocket 路径默认为 `/vless`。为兼容平台校验器，`docker-compose.yml` 中的端口使用固定字面量 `10086:10086/tcp`；需要改宿主机端口时直接编辑这一行。
 
-如果部署平台注入了 `PORT` 环境变量（Railway、Render、Zeabur 等常见行为），入口脚本会自动使用该端口；显式设置 `VLESS_PORT` 时以 `VLESS_PORT` 为准。
+`docker-compose.yml` 使用全字面量配置，不依赖环境变量文件或 `${...}` 插值，适合校验严格的部署平台。修改 UUID、路径或端口时直接编辑该文件。只用 `docker run` 部署且未设置 `VLESS_PORT` 时，入口脚本才会自动使用平台注入的 `PORT` 变量。
 
 ## 直接使用镜像
 
@@ -87,7 +81,7 @@ VLESS_UUID=<随机 UUID>
 VLESS_PATH=/vless
 ```
 
-平台注入 `PORT` 时会自动使用该端口。若平台要求手动指定容器端口，填写 `10086`。
+只用 Dockerfile 部署时，平台注入的 `PORT` 会自动生效；使用本项目的 `docker-compose.yml` 时端口固定为 `10086`。若平台要求手动指定容器端口，填写 `10086`。
 
 | 平台 | 配置要点 |
 | --- | --- |
@@ -104,14 +98,12 @@ VLESS_PATH=/vless
 | --- | --- | --- |
 | `VLESS_UUID` | 无，必填 | VLESS 用户 UUID |
 | `VLESS_HOST` | `0.0.0.0` | 容器内监听地址 |
-| `VLESS_PORT` | `10086` | 容器内监听端口，健康检查也使用该值 |
+| `VLESS_PORT` | `10086` | 容器内监听端口；Compose 中固定为 `10086` |
 | `VLESS_PATH` | `/vless` | WebSocket 路径 |
 | `VLESS_LOG_LEVEL` | `INFO` | `DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL` |
 | `VLESS_CERT` | 空 | TLS 证书路径，必须与 `VLESS_KEY` 同时设置 |
 | `VLESS_KEY` | 空 | TLS 私钥路径，必须与 `VLESS_CERT` 同时设置 |
-| `HOST_PORT` | `10086` | Compose 暴露到宿主机的端口 |
-
-未设置 `VLESS_PORT` 时，也支持平台注入的 `PORT` 变量。
+直接用 `docker run` 且未设置 `VLESS_PORT` 时，也支持平台注入的 `PORT` 变量。
 
 也可以直接传入 `vs.py` 的参数，例如：
 
@@ -124,14 +116,14 @@ docker run --rm -p 10086:10086 ghcr.io/alice/pyvless:latest \
 
 ## 启用 TLS
 
-把证书放入 `./certs`，在 `.env` 中设置：
+把证书放入 `./certs`，取消 `docker-compose.yml` 中 `volumes` 的注释，并在 `environment` 下增加：
 
-```dotenv
-VLESS_CERT=/certs/fullchain.pem
-VLESS_KEY=/certs/privkey.pem
+```yaml
+      VLESS_CERT: "/certs/fullchain.pem"
+      VLESS_KEY: "/certs/privkey.pem"
 ```
 
-然后取消 `docker-compose.yml` 中 `volumes` 的注释并重启：
+然后重启：
 
 ```bash
 docker compose up -d
@@ -162,7 +154,7 @@ sudo chmod 600 certs/privkey.pem
 | --- | --- |
 | 地址 | 服务器域名或 IP |
 | 端口 | 映射到宿主机的端口，默认 `10086` |
-| UUID | `.env` 中的 `VLESS_UUID` |
+| UUID | `docker-compose.yml` 中的 `VLESS_UUID` |
 | 传输 | WebSocket |
 | 路径 | `VLESS_PATH`，默认 `/vless` |
 | Host 请求头 | 与地址一致；使用 CDN 时填 CDN 域名 |
