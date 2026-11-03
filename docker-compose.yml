@@ -1,0 +1,31 @@
+name: pyvless
+
+services:
+  vless:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_NAME:-pyvless:latest}
+    container_name: pyvless
+    restart: unless-stopped
+    init: true
+    environment:
+      VLESS_UUID: ${VLESS_UUID:?Set VLESS_UUID in .env (copy .env.example to .env)}
+      VLESS_HOST: ${VLESS_HOST:-0.0.0.0}
+      VLESS_PORT: ${VLESS_PORT:-10086}
+      VLESS_PATH: ${VLESS_PATH:-/vless}
+      VLESS_LOG_LEVEL: ${VLESS_LOG_LEVEL:-INFO}
+      VLESS_CERT: ${VLESS_CERT:-}
+      VLESS_KEY: ${VLESS_KEY:-}
+    ports:
+      - "${HOST_PORT:-10086}:${VLESS_PORT:-10086}/tcp"
+    # Uncomment to serve TLS directly from the container.
+    # volumes:
+    #   - ./certs:/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

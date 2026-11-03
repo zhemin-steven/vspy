@@ -1,0 +1,12 @@
+.git
+.github
+.gitignore
+.env
+.venv
+__pycache__
+*.py[cod]
+*.log
+certs
+logs
+README.md
+docker-compose*.yml
