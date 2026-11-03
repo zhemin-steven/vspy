@@ -37,7 +37,9 @@
    docker compose logs -f vless
    ```
 
-服务默认监听并映射 `10086` 端口，WebSocket 路径默认为 `/vless`。为兼容平台校验器，`docker-compose.yml` 中的端口使用固定字面量 `10086:10086/tcp`；需要改宿主机端口时直接编辑这一行。
+服务默认监听并映射 `10086` 端口，WebSocket 路径默认为 `/vless`。`docker-compose.yml` 中的端口使用固定字面量 `10086:10086`；需要改宿主机端口时直接编辑这一行。
+
+**Cloady 注意：不要写成 `10086:10086/tcp`。** Cloady 会把带 `/tcp` 的端口登记为原始 TCP 端口，而不是 Web 端口。此时 `https://你的域名/health` 不会路由到应用，而会返回平台路由器的 `404 page not found`；原始 TCP 端口又只通过 IPv6 发布，所以 `http://你的域名:10086/health` 还可能超时。请在 `ports` 中去掉 `/tcp`，重新部署。
 
 `docker-compose.yml` 使用全字面量配置，不依赖环境变量文件或 `${...}` 插值，适合校验严格的部署平台。修改 UUID、路径或端口时直接编辑该文件。只用 `docker run` 部署且未设置 `VLESS_PORT` 时，入口脚本才会自动使用平台注入的 `PORT` 变量。
 
@@ -48,6 +50,14 @@
 ```bash
 docker exec -it pyvless sh
 ```
+
+进入后可直接运行一键诊断：
+
+```sh
+diagnose-pyvless
+```
+
+它会输出环境变量、`vs.py` 进程、监听端口、IPv4/IPv6 本地健康检查和 `localhost` 解析结果。
 
 平台没有 `docker exec` 时，使用平台控制台的“终端 / Exec / Web Shell”进入实例，然后依次执行：
 
@@ -70,6 +80,59 @@ curl -i --max-time 5 http://127.0.0.1:10086/time
 - 第 2 步没有监听记录，查看容器日志。常见原因是 UUID 无效、证书和私钥只配置了一个，或端口被平台覆盖。
 - 只监听 `127.0.0.1:10086` 而不是 `0.0.0.0:10086`，说明 `VLESS_HOST` 配错了，应为 `0.0.0.0`。
 - 平台如果要求应用监听它注入的 `PORT`，把 `docker-compose.yml` 中的 `VLESS_PORT`、`ports` 和平台容器端口统一改成该端口，三者必须一致。
+
+### 内部 200、外部 502 的排查顺序
+
+502 表示平台反向代理已经收到请求，但没有从容器拿到有效响应。按下面顺序排查：
+
+1. **确认平台代理目标端口**
+
+   在容器内执行：
+
+   ```sh
+   env | sort | grep -Ei 'port|vless'
+   ss -lntp
+   ```
+
+   如果存在 `PORT=3000` 之类的变量，而 `ss` 显示应用只监听 `10086`，平台代理很可能在连 `3000`，于是返回 502。把 `VLESS_PORT`、`docker-compose.yml` 的 `ports`、平台“容器端口”三处统一改成同一个端口。
+
+   启动日志现在也会在 `PORT` 与 `VLESS_PORT` 不一致时输出 `WARNING`。
+
+2. **确认监听地址**
+
+   `ss -lntp` 应显示 `0.0.0.0:端口` 或 `*:端口`。如果显示 `127.0.0.1:端口`，平台代理从容器外部无法连接，设置 `VLESS_HOST=0.0.0.0`。
+
+3. **确认 IPv6 回环**
+
+   ```sh
+   curl -g -6 -v --max-time 3 'http://[::1]:10086/health'
+   ```
+
+   如果 IPv4 正常、IPv6 拒绝，而平台代理使用 `localhost` 且优先解析到 `::1`，可把 `VLESS_HOST` 改为 `::` 让服务同时监听 IPv6（需重新部署验证 IPv4 仍可访问）。
+
+4. **区分所有路径都 502，还是只有 WebSocket 502**
+
+   在外部执行：
+
+   ```bash
+   curl -v https://你的域名/health
+   curl -v https://你的域名/time
+   ```
+
+   - 所有路径都 502：端口、监听地址或平台代理上游配置问题。
+   - `/health` 正常但 `/vless` 502：平台未开启 WebSocket Upgrade，或路径配置不一致。
+
+5. **查看平台代理日志**
+
+   重点找上游错误：
+
+   - `connect() failed (111: Connection refused)`：端口写错或应用只监听回环地址。
+   - `upstream timed out`：端口可达但响应超时，检查平台超时和容器资源。
+   - `no live upstreams` / unhealthy：平台健康检查失败，确认健康检查路径为 `/health`、端口与应用一致。
+
+6. **确认平台到容器的协议**
+
+   容器默认提供 HTTP。平台应使用 HTTP 访问上游并在边缘终止 TLS；如果平台把上游协议配置成 HTTPS，而容器没有配置证书，会直接 502。
 
 ## 直接使用镜像
 

@@ -10,7 +10,7 @@ services:
       VLESS_PATH: "/vless"
       VLESS_LOG_LEVEL: "INFO"
     ports:
-      - "10086:10086/tcp"
+      - "10086:10086"
     # Uncomment to serve TLS directly from the container.
     # volumes:
     #   - ./certs:/certs:ro

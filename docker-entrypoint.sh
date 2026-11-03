@@ -8,9 +8,15 @@ fi
 
 : "${VLESS_UUID:?VLESS_UUID must be set, for example: docker run -e VLESS_UUID=<uuid> ...}"
 
+effective_port="${VLESS_PORT:-${PORT:-10086}}"
+if [ -n "${PORT:-}" ] && [ "$PORT" != "$effective_port" ]; then
+    echo "WARNING: PORT=$PORT but server will listen on $effective_port (VLESS_PORT takes precedence)." >&2
+    echo "WARNING: if the platform proxy targets PORT=$PORT, external requests will return 502." >&2
+fi
+
 set -- \
     --host "${VLESS_HOST:-0.0.0.0}" \
-    --port "${VLESS_PORT:-${PORT:-10086}}" \
+    --port "$effective_port" \
     --uuid "$VLESS_UUID" \
     --path "${VLESS_PATH:-/vless}" \
     --log-level "${VLESS_LOG_LEVEL:-INFO}"

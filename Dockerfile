@@ -24,8 +24,10 @@ WORKDIR /app
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY vs.py /app/vs.py
 COPY healthcheck.py /app/healthcheck.py
+COPY diagnose.sh /usr/local/bin/diagnose-pyvless
 
-RUN chmod 0555 /usr/local/bin/docker-entrypoint.sh /app/vs.py /app/healthcheck.py
+RUN chmod 0555 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/diagnose-pyvless \
+    /app/vs.py /app/healthcheck.py
 
 USER vless
 
