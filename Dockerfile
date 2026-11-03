@@ -3,6 +3,18 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        procps \
+        net-tools \
+        iproute2 \
+        bind9-dnsutils \
+        netcat-openbsd \
+        lsof \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 10001 vless \
     && useradd --system --uid 10001 --gid vless \
         --home-dir /app --no-create-home --shell /usr/sbin/nologin vless

@@ -41,6 +41,36 @@
 
 `docker-compose.yml` 使用全字面量配置，不依赖环境变量文件或 `${...}` 插值，适合校验严格的部署平台。修改 UUID、路径或端口时直接编辑该文件。只用 `docker run` 部署且未设置 `VLESS_PORT` 时，入口脚本才会自动使用平台注入的 `PORT` 变量。
 
+## 容器内排查 502
+
+镜像已安装 `curl`、`ps`、`ss`、`netstat`、`dig`/`nslookup`、`nc` 和 `lsof`。进入容器：
+
+```bash
+docker exec -it pyvless sh
+```
+
+平台没有 `docker exec` 时，使用平台控制台的“终端 / Exec / Web Shell”进入实例，然后依次执行：
+
+```sh
+# 1. 进程是否存在
+ps -ef | grep vs.py
+
+# 2. 是否监听 0.0.0.0:10086
+ss -lntp
+netstat -lntp
+
+# 3. 容器内部健康检查
+curl -v --max-time 5 http://127.0.0.1:10086/health
+curl -i --max-time 5 http://127.0.0.1:10086/time
+```
+
+判断方式：
+
+- 第 3 步返回 `200`，说明服务本身正常，502 来自平台反向代理。重点检查平台配置的容器端口是否为 `10086`、健康检查路径是否为 `/health`、是否支持 WebSocket Upgrade。
+- 第 2 步没有监听记录，查看容器日志。常见原因是 UUID 无效、证书和私钥只配置了一个，或端口被平台覆盖。
+- 只监听 `127.0.0.1:10086` 而不是 `0.0.0.0:10086`，说明 `VLESS_HOST` 配错了，应为 `0.0.0.0`。
+- 平台如果要求应用监听它注入的 `PORT`，把 `docker-compose.yml` 中的 `VLESS_PORT`、`ports` 和平台容器端口统一改成该端口，三者必须一致。
+
 ## 直接使用镜像
 
 GitHub Actions 会把镜像发布到：
